@@ -1,0 +1,22 @@
+
+> myapp@0.1.0 start
+> next start
+
+▲ Next.js 16.2.4
+- Local:         http://localhost:3000
+- Network:       http://192.168.0.2:3000
+✓ Ready in 214ms
+prisma:query SELECT `main`.`User`.`id`, `main`.`User`.`username`, `main`.`User`.`password`, `main`.`User`.`role` FROM `main`.`User` WHERE (`main`.`User`.`username` = ? AND 1=1) LIMIT ? OFFSET ?
+prisma:query SELECT SUM(`main`.`Expense`.`amount`), `main`.`Expense`.`category` FROM `main`.`Expense` WHERE (`main`.`Expense`.`date` >= ? AND `main`.`Expense`.`date` <= ?) GROUP BY `main`.`Expense`.`category` LIMIT ? OFFSET ?
+prisma:query SELECT SUM(`amount`) FROM (SELECT `main`.`CustomerLedger`.`amount` FROM `main`.`CustomerLedger` WHERE 1=1 LIMIT ? OFFSET ?) AS `sub`
+prisma:query SELECT SUM(`amount`) FROM (SELECT `main`.`SupplierLedger`.`amount` FROM `main`.`SupplierLedger` WHERE 1=1 LIMIT ? OFFSET ?) AS `sub`
+prisma:query SELECT SUM(`rawCopperUsed`), SUM(`wireProduced`) FROM (SELECT `main`.`Production`.`rawCopperUsed`, `main`.`Production`.`wireProduced` FROM `main`.`Production` WHERE (`main`.`Production`.`date` >= ? AND `main`.`Production`.`date` <= ?) LIMIT ? OFFSET ?) AS `sub`
+prisma:query SELECT `main`.`Sale`.`id`, `main`.`Sale`.`customerId`, `main`.`Sale`.`date`, `main`.`Sale`.`totalValue`, `main`.`Sale`.`amountPaid` FROM `main`.`Sale` WHERE 1=1 ORDER BY `main`.`Sale`.`date` ASC LIMIT ? OFFSET ?
+prisma:query SELECT `main`.`Sale`.`id`, `main`.`Sale`.`customerId`, `main`.`Sale`.`date`, `main`.`Sale`.`totalValue`, `main`.`Sale`.`amountPaid` FROM `main`.`Sale` WHERE (`main`.`Sale`.`date` >= ? AND `main`.`Sale`.`date` <= ?) LIMIT ? OFFSET ?
+prisma:query SELECT `main`.`SaleItem`.`id`, `main`.`SaleItem`.`saleId`, `main`.`SaleItem`.`productCategory`, `main`.`SaleItem`.`brand`, `main`.`SaleItem`.`wireType`, `main`.`SaleItem`.`qty`, `main`.`SaleItem`.`pricePerTon`, `main`.`SaleItem`.`totalValue`, `main`.`SaleItem`.`rawCopperCostAtSale` FROM `main`.`SaleItem` WHERE `main`.`SaleItem`.`saleId` IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) LIMIT ? OFFSET ?
+prisma:query SELECT `main`.`Expense`.`id`, `main`.`Expense`.`date`, `main`.`Expense`.`category`, `main`.`Expense`.`amount`, `main`.`Expense`.`description`, `main`.`Expense`.`expenseMonth` FROM `main`.`Expense` WHERE (`main`.`Expense`.`date` >= ? AND `main`.`Expense`.`date` <= ?) LIMIT ? OFFSET ?
+prisma:query SELECT `main`.`Purchase`.`id`, `main`.`Purchase`.`supplierId`, `main`.`Purchase`.`date`, `main`.`Purchase`.`qty`, `main`.`Purchase`.`pricePerTon`, `main`.`Purchase`.`totalValue`, `main`.`Purchase`.`amountPaid` FROM `main`.`Purchase` WHERE (`main`.`Purchase`.`date` >= ? AND `main`.`Purchase`.`date` <= ?) LIMIT ? OFFSET ?
+prisma:query SELECT `main`.`BankAccount`.`id`, `main`.`BankAccount`.`name`, `main`.`BankAccount`.`balance`, `main`.`BankAccount`.`createdAt`, `main`.`BankAccount`.`updatedAt` FROM `main`.`BankAccount` WHERE 1=1 LIMIT ? OFFSET ?
+prisma:query SELECT `main`.`ScrapInventory`.`id`, `main`.`ScrapInventory`.`date`, `main`.`ScrapInventory`.`type`, `main`.`ScrapInventory`.`qty`, `main`.`ScrapInventory`.`revenue`, `main`.`ScrapInventory`.`bankAccountId` FROM `main`.`ScrapInventory` WHERE 1=1 LIMIT ? OFFSET ?
+prisma:query SELECT `main`.`ScrapInventory`.`id`, `main`.`ScrapInventory`.`date`, `main`.`ScrapInventory`.`type`, `main`.`ScrapInventory`.`qty`, `main`.`ScrapInventory`.`revenue`, `main`.`ScrapInventory`.`bankAccountId` FROM `main`.`ScrapInventory` WHERE `main`.`ScrapInventory`.`date` >= ? ORDER BY `main`.`ScrapInventory`.`date` DESC LIMIT ? OFFSET ?
+prisma:query SELECT `main`.`BankAccount`.`id`, `main`.`BankAccount`.`name`, `main`.`BankAccount`.`balance`, `main`.`BankAccount`.`createdAt`, `main`.`BankAccount`.`updatedAt` FROM `main`.`BankAccount` WHERE `main`.`BankAccount`.`id` IN (?) LIMIT ? OFFSET ?

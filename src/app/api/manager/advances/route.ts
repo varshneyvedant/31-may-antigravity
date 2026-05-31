@@ -1,0 +1,142 @@
+import { ManagerAdvancePostSchema, ManagerAdvancePutSchema } from '@/lib/validations';
+export const dynamic = "force-dynamic";
+import { NextResponse } from 'next/server';
+
+
+import { prisma } from '@/lib/prisma';
+import { logAudit } from '@/lib/audit/logger';
+
+
+
+export async function GET(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const empId = searchParams.get('empId');
+    if (!empId) return NextResponse.json({ error: 'Missing employee ID' }, { status: 400 });
+
+    const employee = await prisma.employee.findUnique({
+      where: { id: empId },
+      include: { advances: true }
+    });
+
+    if (!employee) return NextResponse.json({ error: 'Employee not found' }, { status: 404 });
+
+    const totalAdvances = employee.advances.reduce((sum, a) => sum + (Number(a.amount) - Number(a.amountRepaid)), 0);
+    const monthsAdvance = Number(employee.baseSalary) > 0 ? (totalAdvances / Number(employee.baseSalary)) : 0;
+
+    let recommendation = "Safe to approve advance.";
+    let recommendColor = "text-green-500";
+    let isWarning = false;
+
+    if (monthsAdvance >= 4) {
+       recommendation = "CRITICAL WARNING: Employee already has more than 4 months of pending advances. DO NOT APPROVE further advances until existing debt is cleared.";
+       recommendColor = "text-red-500";
+       isWarning = true;
+    } else if (monthsAdvance > 2) {
+       recommendation = "Warning: Employee has over 2 months of pending advances. Proceed with caution.";
+       recommendColor = "text-orange-500";
+       isWarning = true;
+    }
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        totalAdvances,
+        monthsAdvance: monthsAdvance.toFixed(1),
+        recommendation,
+        recommendColor,
+        isWarning,
+        advances: employee.advances
+      }
+    });
+  } catch (error) {
+    return NextResponse.json({ error: 'Database transaction failed' }, { status: 500 });
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const body = await request.json();
+
+    // Check if this is a repayment
+    if (body.action === 'REPAY') {
+        const validation = ManagerAdvancePutSchema.safeParse(body);
+        if (!validation.success) {
+          return NextResponse.json({ error: "Invalid data", details: validation.error.format() }, { status: 400 });
+        }
+        const { employeeId, amount } = validation.data;
+        let remainingRepayment = amount;
+
+        // Fetch unpaid advances for this employee ordered oldest first
+        const pendingAdvances = await prisma.advance.findMany({
+          where: {
+            employeeId,
+            amountRepaid: { lt: prisma.advance.fields.amount }
+          },
+          orderBy: { date: 'asc' }
+        });
+
+        await prisma.$transaction(async (tx) => {
+          for (const advance of pendingAdvances) {
+             if (remainingRepayment <= 0) break;
+
+             const pending = Number(advance.amount) - Number(advance.amountRepaid);
+             const payToThisAdvance = Math.min(pending, remainingRepayment);
+
+             await tx.advance.update({
+                 where: { id: advance.id },
+                 data: { amountRepaid: Number(advance.amountRepaid) + payToThisAdvance }
+             });
+
+             await tx.advanceRepayment.create({
+                 data: {
+                    advanceId: advance.id,
+                    amount: payToThisAdvance,
+                    date: new Date()
+                 }
+             });
+
+             remainingRepayment -= payToThisAdvance;
+          }
+        });
+
+        await logAudit({
+          action: 'CREATE',
+          module: 'AdvanceRepayment',
+          description: `Logged employee repayment of ₹${amount} for employee ID ${employeeId}`,
+          details: { employeeId, amount }
+        });
+
+        return NextResponse.json({ success: true });
+    }
+
+    // Normal advance creation
+    const validation = ManagerAdvancePostSchema.safeParse(body);
+    if (!validation.success) {
+      return NextResponse.json({ error: "Invalid data", details: validation.error.format() }, { status: 400 });
+    }
+    const { employeeId, amount, reason, date } = validation.data;
+    const recordDate = date ? new Date(date) : new Date();
+
+    const advance = await prisma.advance.create({
+      data: {
+        employeeId,
+        date: recordDate,
+        amount: amount,
+        reason
+      }
+    });
+
+    await logAudit({
+      action: 'CREATE',
+      module: 'Advance',
+      description: `Logged employee advance of ₹${amount} for employee ID ${employeeId}. Reason: ${reason || 'N/A'}`,
+      details: { id: advance.id, employeeId, amount, reason }
+    });
+
+    return NextResponse.json({ success: true, advance });
+  } catch (error) {
+    console.error(error);
+    return NextResponse.json({ error: 'Database transaction failed' }, { status: 500 });
+  }
+}
