@@ -160,8 +160,8 @@ export default function ManagerDashboard() {
                 </div>
                 
                 <div className="pt-6 border-t border-[#333] text-center">
-                   <p className="text-xs text-gray-600">Authorized Manager Session | Varshney Elec Corporation</p>
-                </div>
+                    <p className="text-xs text-gray-600">Authorized Manager Session | VARSHNEY ELECTRICAL INDUSTRIES</p>
+                 </div>
              </div>
           </div>
         </>

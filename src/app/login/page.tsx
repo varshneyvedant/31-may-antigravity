@@ -40,8 +40,8 @@ export default function LoginPage() {
            <div className="bg-red-500/10 p-4 rounded-full mb-4">
               <Lock className="text-red-500 w-8 h-8" />
            </div>
-           <h1 className="text-2xl font-bold text-white text-center">
-             <span className="text-red-500">VARSHNEY</span> ELECTRICAL
+           <h1 className="text-2xl font-bold text-white text-center tracking-tight">
+             <span className="text-red-500">VARSHNEY</span> ELECTRICAL INDUSTRIES
            </h1>
            <p className="text-gray-400 mt-2">Secure ERP Portal</p>
         </div>

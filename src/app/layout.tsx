@@ -8,7 +8,7 @@ import NextAuthProvider from '@/components/NextAuthProvider';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'CuTracker - Copper Factory ERP',
+  title: 'VEI ERP - Copper Factory ERP',
   description: 'Internal tracking system for copper manufacturing',
 };
 

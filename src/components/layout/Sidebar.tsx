@@ -43,8 +43,9 @@ export default function Sidebar() {
   return (
     <div className="w-64 bg-[#141414] border-r border-[#333] h-screen fixed left-0 top-0 flex flex-col shadow-2xl z-50">
       <div className="p-6 border-b border-[#333] bg-[#1a1a1a]">
-        <h1 className="text-xl font-bold text-white flex items-center leading-tight">
-          <span className="text-red-500 mr-2">VARSHNEY</span> ELEC
+        <h1 className="text-base font-bold text-white flex flex-col leading-tight tracking-wider">
+          <span className="text-red-500 font-extrabold">VARSHNEY</span>
+          <span className="text-[10px] text-gray-400 font-black tracking-widest mt-0.5">ELECTRICAL INDUSTRIES</span>
         </h1>
         <div className="flex flex-col gap-1.5 mt-2">
           <p className="text-xs text-gray-400 font-medium tracking-wide flex items-center gap-1">
