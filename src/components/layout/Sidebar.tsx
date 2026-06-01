@@ -6,7 +6,8 @@ import {
   LayoutDashboard, LogOut, Package, PackageOpen,
   Banknote, ShoppingCart, Users, Receipt,
   Trash2, TrendingUp, HandCoins, Building2, Briefcase,
-  LineChart, Box, BookOpen, Activity, UserCog, ShieldCheck
+  LineChart, Box, BookOpen, Activity, UserCog, ShieldCheck,
+  RotateCcw, Lock, FileText
 } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 import { useSession, signOut } from 'next-auth/react';
@@ -122,6 +123,10 @@ export default function Sidebar() {
                     <Package size={18} />
                     Purchase Entry
                   </Link>
+                  <Link href="/manager/returns" className={`flex items-center gap-3 p-3 text-sm rounded-md transition-colors font-medium ${pathname === '/manager/returns' ? 'bg-red-500/10 text-red-500 border border-red-500/20' : 'text-gray-400 hover:text-white hover:bg-[#2a2a2a]'}`}>
+                    <RotateCcw size={18} />
+                    Quality Returns
+                  </Link>
                 </div>
               </div>
 
@@ -167,6 +172,14 @@ export default function Sidebar() {
                   <Link href="/owner/expenses" className={`flex items-center gap-3 p-3 text-sm rounded-md transition-colors font-medium ${pathname === '/owner/expenses' ? 'bg-red-500/10 text-red-500 border border-red-500/20' : 'text-gray-400 hover:text-white hover:bg-[#2a2a2a]'}`}>
                     <Receipt size={18} />
                     Expenses Deep Dive
+                  </Link>
+                  <Link href="/owner/journals" className={`flex items-center gap-3 p-3 text-sm rounded-md transition-colors font-medium ${pathname === '/owner/journals' ? 'bg-red-500/10 text-red-500 border border-red-500/20' : 'text-gray-400 hover:text-white hover:bg-[#2a2a2a]'}`}>
+                    <FileText size={18} />
+                    General Ledger GL
+                  </Link>
+                  <Link href="/owner/period-lock" className={`flex items-center gap-3 p-3 text-sm rounded-md transition-colors font-medium ${pathname === '/owner/period-lock' ? 'bg-red-500/10 text-red-500 border border-red-500/20' : 'text-gray-400 hover:text-white hover:bg-[#2a2a2a]'}`}>
+                    <Lock size={18} />
+                    Period Locking
                   </Link>
                 </div>
               </div>

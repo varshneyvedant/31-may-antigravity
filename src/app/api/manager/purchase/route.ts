@@ -5,6 +5,8 @@ import { NextResponse } from 'next/server';
 
 import { prisma } from '@/lib/prisma';
 import { logAudit } from '@/lib/audit/logger';
+import { assertPeriodNotLocked } from '@/lib/periodLock';
+import { postJournalEntry } from '@/lib/ledger/journal';
 
 export async function GET() {
   try {
@@ -32,6 +34,9 @@ export async function DELETE(request: Request) {
        const purchase = await tx.purchase.findUnique({ where: { id } });
        if (!purchase) throw new Error('Purchase not found');
 
+       // Assert period not locked
+       await assertPeriodNotLocked(purchase.date);
+
        // Remove corresponding ledger entries
        // Ledger description: `Purchase of ${quantity} Tons`
        await tx.supplierLedger.updateMany({
@@ -41,6 +46,11 @@ export async function DELETE(request: Request) {
              date: purchase.date
           },
           data: { isDeleted: true }
+       });
+
+       // Delete journal entries associated with this Purchase
+       await tx.journalEntry.deleteMany({
+          where: { referenceType: 'PURCHASE', referenceId: id }
        });
 
        await tx.purchase.update({ where: { id }, data: { isDeleted: true } });
@@ -76,6 +86,7 @@ export async function POST(request: Request) {
     }
 
     const recordDate = date ? new Date(date) : new Date();
+    await assertPeriodNotLocked(recordDate);
 
     const result = await prisma.$transaction(async (tx) => {
       const purchase = await tx.purchase.create({
@@ -107,6 +118,21 @@ export async function POST(request: Request) {
           amount: totalValue,
           description: `Purchase of ${quantity} Tons`
         }
+      });
+
+      // Post Double-Entry Journal Entry
+      const supplier = await tx.supplier.findUnique({ where: { id: supplierId } });
+      const supplierName = supplier ? supplier.name : 'Supplier';
+
+      await postJournalEntry(tx, {
+        date: recordDate,
+        description: `Raw Copper Purchase from ${supplierName} (ID: ${purchase.id})`,
+        referenceType: 'PURCHASE',
+        referenceId: purchase.id,
+        lines: [
+          { accountName: 'Inventory', accountType: 'ASSET' as const, debit: totalValue, credit: 0 },
+          { accountName: 'Accounts Payable', accountType: 'LIABILITY' as const, debit: 0, credit: totalValue }
+        ]
       });
 
       return purchase;

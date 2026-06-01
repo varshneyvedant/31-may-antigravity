@@ -5,6 +5,8 @@ import { NextResponse } from 'next/server';
 
 import { prisma } from '@/lib/prisma';
 import { logAudit } from '@/lib/audit/logger';
+import { assertPeriodNotLocked } from '@/lib/periodLock';
+import { postJournalEntry } from '@/lib/ledger/journal';
 
 
 
@@ -18,6 +20,7 @@ export async function POST(request: Request) {
     const { category, amount, description, expenseMonth, date } = validation.data;
 
     const recordDate = date ? new Date(date) : new Date();
+    await assertPeriodNotLocked(recordDate);
 
     const expense = await prisma.expense.create({
       data: {
@@ -25,8 +28,23 @@ export async function POST(request: Request) {
         category,
         amount: amount,
         description,
-        expenseMonth
+        expenseMonth,
+        status: 'PAID'
       }
+    });
+
+    // Post Double-Entry Journal Entry
+    await prisma.$transaction(async (tx) => {
+      await postJournalEntry(tx, {
+        date: recordDate,
+        description: `Factory Expense Category: ${category} (${description || 'Paid'})`,
+        referenceType: 'EXPENSE',
+        referenceId: expense.id,
+        lines: [
+          { accountName: 'Factory Expenses', accountType: 'EXPENSE' as const, debit: Number(amount), credit: 0 },
+          { accountName: 'Cash & Bank', accountType: 'ASSET' as const, debit: 0, credit: Number(amount) }
+        ]
+      });
     });
 
     await logAudit({

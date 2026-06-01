@@ -68,6 +68,7 @@ export default function RecordSale() {
   const [overridePin, setOverridePin] = useState('');
   const [pinError, setPinError] = useState('');
   const [createdSaleForSlip, setCreatedSaleForSlip] = useState<any>(null);
+  const [sharing, setSharing] = useState(false);
 
   const { items, addItem, removeItem, updateItem, reset } = useCartStore();
 
@@ -201,30 +202,73 @@ export default function RecordSale() {
     }
   };
 
-  const getWhatsAppShareUrl = (slip: any) => {
-    if (!slip) return '';
-    let text = `*LEDGER SLIP*\n`;
-    text += `----------------------------------------\n`;
-    text += `*Date:* ${new Date(slip.date).toLocaleDateString('en-IN')}\n`;
-    text += `*Party Name:* ${slip.customer?.name || 'Cash Sale'}\n`;
-    if (slip.customer?.transport) {
-      text += `*Transport:* ${slip.customer.transport}\n`;
-    }
-    text += `----------------------------------------\n`;
-    text += `*Items Details:*\n`;
-    slip.items.forEach((item: any) => {
-      const qtyText = `${item.qty} Tons`;
-      const itemDesc = item.productCategory === 'Raw Copper Bundle' 
-        ? `Raw Copper` 
-        : `${item.brand} ${item.wireType}`;
-      text += `- ${itemDesc} (${qtyText}) @ ₹${item.pricePerKg}/Kg = ₹${calculateItemTotal(item).toLocaleString('en-IN', {maximumFractionDigits:0})}\n`;
-    });
-    text += `----------------------------------------\n`;
-    text += `*GRAND TOTAL: ₹${slip.total.toLocaleString('en-IN', {maximumFractionDigits:0})}*\n`;
-    text += `----------------------------------------\n`;
+  const handleWhatsAppShareImage = async () => {
+    const element = document.getElementById('ledger-slip');
+    if (!element || !createdSaleForSlip) return;
+    setSharing(true);
+    try {
+      const html2canvas = (await import('html2canvas')).default;
+      const canvas = await html2canvas(element, {
+        backgroundColor: '#fcfbf4',
+        scale: 2,
+        useCORS: true
+      });
 
-    const phone = slip.customer?.contact || '';
-    return `https://api.whatsapp.com/send?phone=${encodeURIComponent(phone)}&text=${encodeURIComponent(text)}`;
+      const phone = createdSaleForSlip.customer?.contact || '';
+      const textNotice = `Hi, I am sharing the Invoice/Ledger Slip image (${createdSaleForSlip.invoiceNo}) for ₹${createdSaleForSlip.total.toLocaleString('en-IN', {maximumFractionDigits:0})} with you.`;
+
+      // 1. Try Web Share API (shares the image file directly on mobile / supported devices)
+      canvas.toBlob(async (blob) => {
+        if (!blob) {
+          setSharing(false);
+          return;
+        }
+
+        let shared = false;
+        try {
+          if (typeof navigator !== 'undefined' && navigator.share && typeof File !== 'undefined') {
+            const file = new File([blob], `ledger-slip-${createdSaleForSlip.invoiceNo}.png`, { type: 'image/png' });
+            const canShareFiles = navigator.canShare && navigator.canShare({ files: [file] });
+            if (canShareFiles) {
+              await navigator.share({
+                files: [file],
+                title: `Ledger Slip ${createdSaleForSlip.invoiceNo}`,
+                text: textNotice
+              });
+              shared = true;
+            }
+          }
+        } catch (shareErr) {
+          console.warn('Web Share failed, using reliable fallback:', shareErr);
+        }
+
+        if (shared) {
+          setSharing(false);
+          return;
+        }
+
+        // 2. Fallback: Download PNG image + Open prefilled WhatsApp Chat
+        try {
+          const link = document.createElement('a');
+          link.download = `ledger-slip-${createdSaleForSlip.invoiceNo}.png`;
+          link.href = canvas.toDataURL('image/png');
+          link.click();
+        } catch (downloadErr) {
+          console.error('Failed to trigger download:', downloadErr);
+        }
+
+        // Redirect to WhatsApp Web/App
+        const waText = `${textNotice} I have downloaded the image to your device, please attach it in the chat.`;
+        const waUrl = `https://api.whatsapp.com/send?phone=${encodeURIComponent(phone)}&text=${encodeURIComponent(waText)}`;
+        window.open(waUrl, '_blank');
+        setSharing(false);
+      }, 'image/png');
+
+    } catch (err) {
+      console.error('Error generating image for share:', err);
+      alert('Failed to generate image. Try using manual download first.');
+      setSharing(false);
+    }
   };
 
   const handleDownloadImage = async () => {
@@ -624,14 +668,13 @@ export default function RecordSale() {
 
                {/* Action Buttons */}
                <div className="flex gap-3">
-                  <a
-                    href={getWhatsAppShareUrl(createdSaleForSlip)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-4 rounded transition-colors text-center flex items-center justify-center gap-2 shadow"
-                  >
-                     <Share2 size={18} /> Share on WhatsApp
-                  </a>
+                   <button
+                     onClick={handleWhatsAppShareImage}
+                     disabled={sharing}
+                     className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-4 rounded transition-colors text-center flex items-center justify-center gap-2 shadow disabled:opacity-50"
+                   >
+                     <Share2 size={18} /> {sharing ? 'Generating Image...' : 'Share on WhatsApp'}
+                   </button>
                   <button
                     onClick={() => window.print()}
                     className="bg-[#2a2a2a] hover:bg-[#333] text-white border border-[#444] font-bold py-3 px-4 rounded transition-colors flex items-center justify-center gap-2 shadow"

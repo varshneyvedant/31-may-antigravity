@@ -8,8 +8,8 @@ import {
 } from 'recharts';
 import TimeframeSelector from '@/components/ui/TimeframeSelector';
 import { Timeframe } from '@/lib/timeframe';
-import { formatCurrency } from '@/lib/format';
-import { TrendingUp, Banknote, CreditCard, Factory, MoveUpRight, ArrowUpRight, Clock } from 'lucide-react';
+import { formatCurrency, formatDateIST } from '@/lib/format';
+import { TrendingUp, Banknote, CreditCard, Factory, MoveUpRight, ArrowUpRight, Clock, RotateCcw, Download } from 'lucide-react';
 
 const COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#a855f7'];
 
@@ -27,10 +27,62 @@ export default function FinancialsDashboard() {
       const json = await res.json();
       return json.data;
     },
-    staleTime: 1000 * 60 * 5, // Cache for 5 minutes
+    staleTime: 0, // Fresh metrics loaded on every view/navigation
   });
 
+  const { data: paymentsData, isLoading: loadingPayments } = useQuery({
+    queryKey: ['recentPayments'],
+    queryFn: async () => {
+      const res = await fetch('/api/manager/payments');
+      if (!res.ok) throw new Error('Failed to fetch payments');
+      const json = await res.json();
+      return json.payments;
+    },
+    staleTime: 0,
+  });
+
+  const [activeTab, setActiveTab] = useState<'analytics' | 'pl' | 'bs'>('analytics');
+
   const data = queryData;
+
+  const handleExportPL = () => {
+    if (!data || !data.financialStatements) return;
+    const pl = data.financialStatements.pl;
+    const exportData = [
+      { 'Account Type': 'Operating Revenue', 'Line Item': 'Sales Revenue', 'Amount (₹)': Number(pl.salesRevenue) },
+      { 'Account Type': 'Operating Revenue', 'Line Item': 'Scrap Revenue', 'Amount (₹)': Number(pl.scrapRevenue) },
+      { 'Account Type': 'Operating Revenue', 'Line Item': 'Total Operating Revenue', 'Amount (₹)': Number(pl.totalRevenue) },
+      { 'Account Type': 'Cost of Goods Sold', 'Line Item': 'Direct Material Cost (COGS)', 'Amount (₹)': Number(pl.cogs) },
+      { 'Account Type': 'Cost of Goods Sold', 'Line Item': 'Total Cost of Goods Sold', 'Amount (₹)': Number(pl.cogs) },
+      { 'Account Type': 'Gross Margin', 'Line Item': 'Gross Profit', 'Amount (₹)': Number(pl.grossProfit) },
+      { 'Account Type': 'Operating Expenses', 'Line Item': 'Factory & Administrative Expenses', 'Amount (₹)': Number(pl.operatingExpenses) },
+      { 'Account Type': 'Operating Expenses', 'Line Item': 'Total Operating Expenses', 'Amount (₹)': Number(pl.operatingExpenses) },
+      { 'Account Type': 'Net Income', 'Line Item': 'Net Profit', 'Amount (₹)': Number(pl.netProfit) }
+    ];
+    import('@/lib/export/excel').then(({ exportToExcel }) => {
+      exportToExcel(exportData, `Profit_Loss_Statement_${timeframe}`);
+    });
+  };
+
+  const handleExportBS = () => {
+    if (!data || !data.financialStatements) return;
+    const bs = data.financialStatements.bs;
+    const exportData = [
+      { 'Section': 'Assets', 'Line Item': 'Cash & Bank Balance', 'Amount (₹)': Number(bs.cashBank) },
+      { 'Section': 'Assets', 'Line Item': 'Accounts Receivable (AR)', 'Amount (₹)': Number(bs.accountsReceivable) },
+      { 'Section': 'Assets', 'Line Item': 'Inventories (FIFO Valuation)', 'Amount (₹)': Number(bs.inventory) },
+      { 'Section': 'Assets', 'Line Item': 'Employee Advances', 'Amount (₹)': Number(bs.employeeAdvances) },
+      { 'Section': 'Assets', 'Line Item': 'Total Assets', 'Amount (₹)': Number(bs.totalAssets) },
+      { 'Section': 'Liabilities', 'Line Item': 'Accounts Payable (AP)', 'Amount (₹)': Number(bs.accountsPayable) },
+      { 'Section': 'Liabilities', 'Line Item': 'Total Liabilities', 'Amount (₹)': Number(bs.totalLiabilities) },
+      { 'Section': 'Equity', 'Line Item': 'Retained Earnings', 'Amount (₹)': Number(bs.retainedEarnings) },
+      { 'Section': 'Equity', 'Line Item': 'Total Owner Equity', 'Amount (₹)': Number(bs.retainedEarnings) },
+      { 'Section': 'Equity', 'Line Item': 'Total Liabilities & Equity', 'Amount (₹)': Number(bs.totalLiabilities + bs.retainedEarnings) }
+    ];
+    import('@/lib/export/excel').then(({ exportToExcel }) => {
+      exportToExcel(exportData, 'Balance_Sheet_Statement');
+    });
+  };
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -38,9 +90,31 @@ export default function FinancialsDashboard() {
         <span className="text-red-500">Financial</span> & Production Overview
       </h2>
 
-      <TimeframeSelector value={timeframe} onChange={setTimeframe} />
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <TimeframeSelector value={timeframe} onChange={setTimeframe} />
+        <div className="flex gap-2">
+          <button
+            onClick={() => setActiveTab('analytics')}
+            className={`px-4 py-1.5 rounded font-bold text-sm transition-all ${activeTab === 'analytics' ? 'bg-red-500 text-white shadow' : 'bg-[#2a2a2a] text-gray-400 hover:text-white'}`}
+          >
+            Analytics & Charts
+          </button>
+          <button
+            onClick={() => setActiveTab('pl')}
+            className={`px-4 py-1.5 rounded font-bold text-sm transition-all ${activeTab === 'pl' ? 'bg-red-500 text-white shadow' : 'bg-[#2a2a2a] text-gray-400 hover:text-white'}`}
+          >
+            Profit & Loss (P&L)
+          </button>
+          <button
+            onClick={() => setActiveTab('bs')}
+            className={`px-4 py-1.5 rounded font-bold text-sm transition-all ${activeTab === 'bs' ? 'bg-red-500 text-white shadow' : 'bg-[#2a2a2a] text-gray-400 hover:text-white'}`}
+          >
+            Balance Sheet
+          </button>
+        </div>
+      </div>
 
-      {!loading && data && (
+      {!loading && data && activeTab === 'analytics' && (
         <>
           <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
              <div className="card border-t-2 border-t-green-500 bg-gradient-to-b from-green-950/20 to-transparent">
@@ -268,8 +342,258 @@ export default function FinancialsDashboard() {
               </div>
             </div>
           </div>
+
+          {/* Recent Stakeholder Payments Log */}
+          <div className="card border-t-2 border-t-purple-500 bg-[#1a1a1a]/80 backdrop-blur-md mt-6">
+             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 pb-4 border-b border-[#333]">
+               <div>
+                 <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                    <RotateCcw className="text-purple-400" size={20} /> Recent Stakeholder Payments Log
+                 </h3>
+                 <p className="text-xs text-gray-400 mt-1">Audit log of all registered incoming and outgoing payments</p>
+               </div>
+               
+               <div className="flex gap-2">
+                 <button
+                   onClick={() => {
+                     const exportData = (paymentsData || []).map((p: any) => ({
+                       'Date': formatDateIST(p.date),
+                       'Type': p.type === 'INCOMING' ? 'Customer Paid Us' : 'We Paid Supplier',
+                       'Stakeholder Name': p.customer?.name || p.supplier?.name || '-',
+                       'Amount (₹)': Number(p.amount),
+                       'Description': p.description || ''
+                     }));
+                     import('@/lib/export/excel').then(({ exportToExcel }) => {
+                       exportToExcel(exportData, 'Stakeholder_Payments_Overview');
+                     });
+                   }}
+                   disabled={!paymentsData || paymentsData.length === 0}
+                   className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-green-950/40 hover:bg-green-900/60 border border-green-500/20 text-green-400 rounded transition-colors"
+                 >
+                   <Download size={14} /> Excel
+                 </button>
+                 <button
+                   onClick={() => {
+                     const headers = ['Date & Time', 'Transaction Type', 'Stakeholder', 'Amount', 'Description'];
+                     const rows = (paymentsData || []).map((p: any) => [
+                       formatDateIST(p.date),
+                       p.type === 'INCOMING' ? 'Customer Paid Us' : 'We Paid Supplier',
+                       p.customer?.name || p.supplier?.name || '-',
+                       formatCurrency(Number(p.amount)),
+                       p.description || '-'
+                     ]);
+                     import('@/lib/export/pdf').then(({ exportToPDF }) => {
+                       exportToPDF(headers, rows, 'Stakeholder Payments Overview Ledger');
+                     });
+                   }}
+                   disabled={!paymentsData || paymentsData.length === 0}
+                   className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-red-950/40 hover:bg-red-900/60 border border-red-500/20 text-red-400 rounded transition-colors"
+                 >
+                   <Download size={14} /> PDF
+                 </button>
+               </div>
+             </div>
+
+             {loadingPayments ? (
+               <div className="text-gray-400 py-8 text-center text-sm">Loading payments log...</div>
+             ) : !paymentsData || paymentsData.length === 0 ? (
+               <div className="text-gray-500 py-8 text-center text-sm italic">No recent stakeholder payments found.</div>
+             ) : (
+               <div className="overflow-x-auto">
+                 <table className="w-full text-left text-sm">
+                   <thead>
+                     <tr className="border-b border-[#333] text-gray-400 text-xs uppercase font-black">
+                       <th className="p-3">Date & Time</th>
+                       <th className="p-3">Type</th>
+                       <th className="p-3">Stakeholder</th>
+                       <th className="p-3">Amount</th>
+                       <th className="p-3 font-semibold">Description</th>
+                     </tr>
+                   </thead>
+                   <tbody>
+                     {paymentsData.map((payment: any) => (
+                       <tr key={payment.id} className="border-b border-[#333] last:border-0 hover:bg-[#252525] transition-colors">
+                         <td className="p-3 text-xs text-gray-400 whitespace-nowrap">{formatDateIST(payment.date)}</td>
+                         <td className="p-3">
+                           <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${payment.type === 'INCOMING' ? 'bg-green-950/40 text-green-400 border border-green-500/20' : 'bg-red-950/40 text-red-400 border border-red-500/20'}`}>
+                             {payment.type === 'INCOMING' ? 'INCOMING' : 'OUTGOING'}
+                           </span>
+                         </td>
+                         <td className="p-3 font-semibold text-white">
+                           {payment.customer?.name || payment.supplier?.name || <span className="text-gray-500 italic">None</span>}
+                         </td>
+                         <td className={`p-3 font-bold text-base ${payment.type === 'INCOMING' ? 'text-green-400' : 'text-red-400'}`}>
+                           {payment.type === 'INCOMING' ? '+' : '-'}{formatCurrency(Number(payment.amount))}
+                         </td>
+                         <td className="p-3 text-xs text-gray-400 max-w-xs truncate">{payment.description || '-'}</td>
+                       </tr>
+                     ))}
+                   </tbody>
+                 </table>
+               </div>
+             )}
+          </div>
         </>
       )}
-    </div>
-  );
+
+      {!loading && data && activeTab === 'pl' && (() => {
+        const pl = data.financialStatements?.pl || { salesRevenue: 0, scrapRevenue: 0, totalRevenue: 0, cogs: 0, grossProfit: 0, operatingExpenses: 0, netProfit: 0 };
+        return (
+          <div className="card space-y-6 bg-[#1a1a1a]/90 border border-[#333] shadow-2xl p-8">
+            <div className="flex justify-between items-center pb-4 border-b border-[#333]">
+              <div>
+                <h3 className="text-2xl font-black text-white">Profit & Loss Statement</h3>
+                <p className="text-xs text-gray-400 mt-1">Accrual-based performance report for timeframe: {timeframe}</p>
+              </div>
+              <button
+                onClick={handleExportPL}
+                className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold bg-green-950/40 hover:bg-green-900/60 border border-green-500/20 text-green-400 rounded transition-colors"
+              >
+                <Download size={14} /> Export Excel
+              </button>
+            </div>
+
+            <div className="space-y-6 text-sm text-gray-300">
+              {/* Operating Revenue Section */}
+              <div className="space-y-2">
+                <h4 className="text-xs uppercase font-extrabold text-blue-400 tracking-wider">1. Operating Revenue</h4>
+                <div className="flex justify-between p-2 hover:bg-[#252525] rounded transition-colors pl-4">
+                  <span>Sales Invoices Revenue</span>
+                  <span className="font-mono text-white font-semibold">{formatCurrency(pl.salesRevenue)}</span>
+                </div>
+                <div className="flex justify-between p-2 hover:bg-[#252525] rounded transition-colors pl-4">
+                  <span>Scrap copper sales Revenue</span>
+                  <span className="font-mono text-white font-semibold">{formatCurrency(pl.scrapRevenue)}</span>
+                </div>
+                <div className="flex justify-between p-2.5 bg-[#222] rounded font-bold border-y border-[#333]">
+                  <span className="text-white">Total Operating Revenue (A)</span>
+                  <span className="font-mono text-green-400 text-base">{formatCurrency(pl.totalRevenue)}</span>
+                </div>
+              </div>
+
+              {/* COGS Section */}
+              <div className="space-y-2">
+                <h4 className="text-xs uppercase font-extrabold text-blue-400 tracking-wider">2. Cost of Goods Sold (COGS)</h4>
+                <div className="flex justify-between p-2 hover:bg-[#252525] rounded transition-colors pl-4">
+                  <span>Direct Raw Materials Consumed (FIFO Valuation)</span>
+                  <span className="font-mono text-white font-semibold">{formatCurrency(pl.cogs)}</span>
+                </div>
+                <div className="flex justify-between p-2.5 bg-[#222] rounded font-bold border-y border-[#333]">
+                  <span className="text-white">Total Cost of Goods Sold (B)</span>
+                  <span className="font-mono text-red-400 text-base">{formatCurrency(pl.cogs)}</span>
+                </div>
+              </div>
+
+              {/* Gross Margin */}
+              <div className="flex justify-between p-3 bg-blue-950/20 rounded font-black border border-blue-500/20 text-base">
+                <span className="text-white uppercase tracking-wider">3. Gross Profit (C = A - B)</span>
+                <span className="font-mono text-blue-400">{formatCurrency(pl.grossProfit)}</span>
+              </div>
+
+              {/* Operating Expenses */}
+              <div className="space-y-2">
+                <h4 className="text-xs uppercase font-extrabold text-blue-400 tracking-wider">4. Operating Expenses</h4>
+                <div className="flex justify-between p-2 hover:bg-[#252525] rounded transition-colors pl-4">
+                  <span>Factory Operations & Administrative Expenses</span>
+                  <span className="font-mono text-white font-semibold">{formatCurrency(pl.operatingExpenses)}</span>
+                </div>
+                <div className="flex justify-between p-2.5 bg-[#222] rounded font-bold border-y border-[#333]">
+                  <span className="text-white">Total Operating Expenses (D)</span>
+                  <span className="font-mono text-red-400 text-base">{formatCurrency(pl.operatingExpenses)}</span>
+                </div>
+              </div>
+
+              {/* Net Income */}
+              <div className="flex justify-between p-4 bg-purple-950/30 rounded font-black border border-purple-500/20 text-lg">
+                <span className="text-white uppercase tracking-wider">5. Net Operating Income (E = C - D)</span>
+                <span className={`font-mono ${pl.netProfit >= 0 ? 'text-green-400' : 'text-red-500'}`}>{formatCurrency(pl.netProfit)}</span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {!loading && data && activeTab === 'bs' && (() => {
+        const bs = data.financialStatements?.bs || { cashBank: 0, accountsReceivable: 0, inventory: 0, employeeAdvances: 0, totalAssets: 0, accountsPayable: 0, totalLiabilities: 0, retainedEarnings: 0 };
+        return (
+          <div className="card space-y-6 bg-[#1a1a1a]/90 border border-[#333] shadow-2xl p-8">
+            <div className="flex justify-between items-center pb-4 border-b border-[#333]">
+              <div>
+                <h3 className="text-2xl font-black text-white">Balance Sheet</h3>
+                <p className="text-xs text-gray-400 mt-1">Corporate Statement of Financial Position (Point-in-Time)</p>
+              </div>
+              <button
+                onClick={handleExportBS}
+                className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold bg-green-950/40 hover:bg-green-900/60 border border-green-500/20 text-green-400 rounded transition-colors"
+              >
+                <Download size={14} /> Export Excel
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 text-sm text-gray-300">
+              {/* Assets column */}
+              <div className="space-y-4">
+                <h4 className="text-sm font-bold text-white border-b border-[#333] pb-2 uppercase tracking-wide text-green-400">Assets (Dr.)</h4>
+                <div className="space-y-2">
+                  <span className="text-xs uppercase font-extrabold text-gray-500 block mb-1">Current Assets</span>
+                  <div className="flex justify-between p-2 hover:bg-[#252525] rounded transition-colors pl-2">
+                    <span>Cash & Bank Balance</span>
+                    <span className="font-mono text-white font-semibold">{formatCurrency(bs.cashBank)}</span>
+                  </div>
+                  <div className="flex justify-between p-2 hover:bg-[#252525] rounded transition-colors pl-2">
+                    <span>Accounts Receivable (AR)</span>
+                    <span className="font-mono text-white font-semibold">{formatCurrency(bs.accountsReceivable)}</span>
+                  </div>
+                  <div className="flex justify-between p-2 hover:bg-[#252525] rounded transition-colors pl-2">
+                    <span>Inventory (Raw & Finished Wires)</span>
+                    <span className="font-mono text-white font-semibold">{formatCurrency(bs.inventory)}</span>
+                  </div>
+                  <div className="flex justify-between p-2 hover:bg-[#252525] rounded transition-colors pl-2">
+                    <span>Employee Salary Advances</span>
+                    <span className="font-mono text-white font-semibold">{formatCurrency(bs.employeeAdvances)}</span>
+                  </div>
+                </div>
+                <div className="flex justify-between p-3 bg-green-950/20 rounded font-black border border-green-500/20 text-base">
+                  <span className="text-white">TOTAL ASSETS</span>
+                  <span className="font-mono text-green-400">{formatCurrency(bs.totalAssets)}</span>
+                </div>
+              </div>
+
+              {/* Liabilities & Equity column */}
+              <div className="space-y-4 flex flex-col justify-between">
+                <div className="space-y-4">
+                  <h4 className="text-sm font-bold text-white border-b border-[#333] pb-2 uppercase tracking-wide text-red-400">Liabilities & Equity (Cr.)</h4>
+                  
+                  <div className="space-y-2">
+                    <span className="text-xs uppercase font-extrabold text-gray-500 block mb-1">Current Liabilities</span>
+                    <div className="flex justify-between p-2 hover:bg-[#252525] rounded transition-colors pl-2">
+                      <span>Accounts Payable (AP)</span>
+                      <span className="font-mono text-white font-semibold">{formatCurrency(bs.accountsPayable)}</span>
+                    </div>
+                    <div className="flex justify-between p-3 bg-[#222] rounded font-bold border-y border-[#333] mt-2">
+                      <span className="text-white">Total Liabilities</span>
+                      <span className="font-mono text-white">{formatCurrency(bs.totalLiabilities)}</span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 mt-4">
+                    <span className="text-xs uppercase font-extrabold text-gray-500 block mb-1">Owner Equity</span>
+                    <div className="flex justify-between p-2 hover:bg-[#252525] rounded transition-colors pl-2">
+                      <span>Retained Earnings</span>
+                      <span className="font-mono text-white font-semibold">{formatCurrency(bs.retainedEarnings)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-between p-3 bg-red-950/20 rounded font-black border border-red-500/20 text-base mt-4">
+                  <span className="text-white">TOTAL LIABILITIES & EQUITY</span>
+                  <span className="font-mono text-red-400">{formatCurrency(bs.totalLiabilities + bs.retainedEarnings)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+     </div>
+   );
 }

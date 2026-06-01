@@ -52,6 +52,29 @@ export default function OwnerDashboard() {
     }
   };
 
+  const handleAuthorizePayment = async (paymentId: string, action: 'APPROVE' | 'REJECT') => {
+    const actionStr = action === 'APPROVE' ? 'Approve' : 'Reject';
+    if (!confirm(`Are you sure you want to ${actionStr} this stakeholder payment?`)) return;
+
+    try {
+      const res = await fetch('/api/owner/payments/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paymentId, action })
+      });
+      const json = await res.json();
+      if (res.ok) {
+        alert(`Successfully ${action === 'APPROVE' ? 'approved' : 'rejected'} payment!`);
+        refetch();
+      } else {
+        alert(json.error || 'Authorization failed');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('An unexpected error occurred.');
+    }
+  };
+
   const getIsRollbackable = (log: any) => {
     if (log.action !== 'CREATE') return false;
     try {
@@ -186,6 +209,67 @@ export default function OwnerDashboard() {
                 </div>
              </div>
           </div>
+
+          {/* Pending Payment Authorizations (Dual-Authorization) */}
+          {data?.pendingPayments && data.pendingPayments.length > 0 && (
+             <div className="card border-t-2 border-t-yellow-500 bg-[#1a1a1a]/80 backdrop-blur-md">
+                <div className="flex justify-between items-center mb-4 border-b border-[#333] pb-3">
+                   <h3 className="text-lg text-yellow-500 font-bold flex items-center gap-2">
+                     <RotateCcw className="text-yellow-500" size={18} /> Pending Payment Authorizations
+                   </h3>
+                   <span className="px-2 py-0.5 bg-yellow-950/40 text-yellow-400 border border-yellow-500/20 text-xs font-black rounded-full">
+                      {data.pendingPayments.length} Action Needed
+                   </span>
+                </div>
+                <div className="overflow-x-auto">
+                   <table className="w-full text-left text-sm">
+                      <thead>
+                         <tr className="border-b border-[#333] text-gray-400 text-xs uppercase font-black">
+                            <th className="p-3">Submitted At</th>
+                            <th className="p-3">Type</th>
+                            <th className="p-3">Stakeholder</th>
+                            <th className="p-3">Amount</th>
+                            <th className="p-3">Description</th>
+                            <th className="p-3 text-right">Actions</th>
+                         </tr>
+                      </thead>
+                      <tbody>
+                         {data.pendingPayments.map((p: any) => (
+                            <tr key={p.id} className="border-b border-[#333] last:border-0 hover:bg-[#252525] text-gray-300">
+                               <td className="p-3 whitespace-nowrap text-xs text-gray-400">{formatDateIST(p.date)}</td>
+                               <td className="p-3">
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${p.type === 'INCOMING' ? 'bg-green-950/40 text-green-400 border border-green-500/20' : 'bg-red-950/40 text-red-400 border border-red-500/20'}`}>
+                                     {p.type === 'INCOMING' ? 'Customer Paid' : 'We Paid'}
+                                  </span>
+                               </td>
+                               <td className="p-3 font-semibold text-white">
+                                  {p.customer?.name || p.supplier?.name || '-'}
+                                </td>
+                               <td className="p-3 font-bold text-white text-base">
+                                  {formatCurrency(Number(p.amount))}
+                               </td>
+                               <td className="p-3 text-xs text-gray-400 max-w-xs truncate">{p.description || '-'}</td>
+                               <td className="p-3 text-right flex justify-end gap-2">
+                                  <button
+                                    onClick={() => handleAuthorizePayment(p.id, 'APPROVE')}
+                                    className="px-2.5 py-1 bg-green-950/30 hover:bg-green-900/60 text-green-400 border border-green-500/20 text-xs rounded font-black transition-all"
+                                  >
+                                     Approve
+                                  </button>
+                                  <button
+                                    onClick={() => handleAuthorizePayment(p.id, 'REJECT')}
+                                    className="px-2.5 py-1 bg-red-950/30 hover:bg-red-900/60 text-red-400 border border-red-500/20 text-xs rounded font-black transition-all"
+                                  >
+                                     Reject
+                                  </button>
+                               </td>
+                            </tr>
+                         ))}
+                      </tbody>
+                   </table>
+                </div>
+             </div>
+          )}
 
           {/* Recent Audit Trails */}
           <div className="card">

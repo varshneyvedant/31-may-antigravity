@@ -5,6 +5,8 @@ import { NextResponse } from 'next/server';
 
 import { prisma } from '@/lib/prisma';
 import { logAudit } from '@/lib/audit/logger';
+import { assertPeriodNotLocked } from '@/lib/periodLock';
+import { postJournalEntry } from '@/lib/ledger/journal';
 
 
 
@@ -76,6 +78,9 @@ export async function POST(request: Request) {
           orderBy: { date: 'asc' }
         });
 
+        // Period Lock Check
+        await assertPeriodNotLocked(new Date());
+
         await prisma.$transaction(async (tx) => {
           for (const advance of pendingAdvances) {
              if (remainingRepayment <= 0) break;
@@ -98,6 +103,20 @@ export async function POST(request: Request) {
 
              remainingRepayment -= payToThisAdvance;
           }
+
+          // Post Double-Entry Journal Entry
+          const employee = await tx.employee.findUnique({ where: { id: employeeId } });
+          const empName = employee ? employee.name : 'Employee';
+
+          await postJournalEntry(tx, {
+            date: new Date(),
+            description: `Salary Advance Repayment from ${empName}`,
+            referenceType: 'ADVANCE',
+            lines: [
+              { accountName: 'Cash & Bank', accountType: 'ASSET' as const, debit: Number(amount), credit: 0 },
+              { accountName: 'Employee Advances', accountType: 'ASSET' as const, debit: 0, credit: Number(amount) }
+            ]
+          });
         });
 
         await logAudit({
@@ -117,24 +136,43 @@ export async function POST(request: Request) {
     }
     const { employeeId, amount, reason, date } = validation.data;
     const recordDate = date ? new Date(date) : new Date();
+    await assertPeriodNotLocked(recordDate);
 
-    const advance = await prisma.advance.create({
-      data: {
-        employeeId,
+    const result = await prisma.$transaction(async (tx) => {
+      const adv = await tx.advance.create({
+        data: {
+          employeeId,
+          date: recordDate,
+          amount: amount,
+          reason
+        }
+      });
+
+      const employee = await tx.employee.findUnique({ where: { id: employeeId } });
+      const empName = employee ? employee.name : 'Employee';
+
+      await postJournalEntry(tx, {
         date: recordDate,
-        amount: amount,
-        reason
-      }
+        description: `Salary Advance to ${empName} (${reason || 'Advance'})`,
+        referenceType: 'ADVANCE',
+        referenceId: adv.id,
+        lines: [
+          { accountName: 'Employee Advances', accountType: 'ASSET' as const, debit: Number(amount), credit: 0 },
+          { accountName: 'Cash & Bank', accountType: 'ASSET' as const, debit: 0, credit: Number(amount) }
+        ]
+      });
+
+      return adv;
     });
 
     await logAudit({
       action: 'CREATE',
       module: 'Advance',
       description: `Logged employee advance of ₹${amount} for employee ID ${employeeId}. Reason: ${reason || 'N/A'}`,
-      details: { id: advance.id, employeeId, amount, reason }
+      details: { id: result.id, employeeId, amount, reason }
     });
 
-    return NextResponse.json({ success: true, advance });
+    return NextResponse.json({ success: true, advance: result });
   } catch (error) {
     console.error(error);
     return NextResponse.json({ error: 'Database transaction failed' }, { status: 500 });

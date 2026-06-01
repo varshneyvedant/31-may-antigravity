@@ -8,6 +8,8 @@ import { prisma } from '@/lib/prisma';
 
 import { getFIFOInventoryValue } from '@/lib/analytics/inventory';
 import { logAudit } from '@/lib/audit/logger';
+import { assertPeriodNotLocked } from '@/lib/periodLock';
+import { postJournalEntry } from '@/lib/ledger/journal';
 
 export async function GET() {
   try {
@@ -36,10 +38,18 @@ export async function DELETE(request: Request) {
        const sale = await tx.sale.findUnique({ where: { id } });
        if (!sale) throw new Error('Sale not found');
 
+       // Assert period is not locked before deleting
+       await assertPeriodNotLocked(sale.date);
+
        // Remove corresponding ledger entries
        await tx.customerLedger.updateMany({
           where: { description: { startsWith: `Invoice Sale ID: ${id}` } },
           data: { isDeleted: true }
+       });
+
+       // Delete journal entries associated with this Sale
+       await tx.journalEntry.deleteMany({
+          where: { referenceType: 'SALE', referenceId: id }
        });
 
        await tx.sale.update({ where: { id }, data: { isDeleted: true } });
@@ -67,6 +77,7 @@ export async function POST(request: Request) {
     const { customerId, date, items } = validation.data;
 
     const recordDate = date ? new Date(date) : new Date();
+    await assertPeriodNotLocked(recordDate);
 
     const result = await prisma.$transaction(async (tx) => {
       // Validate minimums and stock availability inside the transaction to prevent TOCTOU
@@ -212,6 +223,32 @@ export async function POST(request: Request) {
           amount: grandTotal,
           description: `Invoice Sale ID: ${sale.id} (${items.length} items)`
         }
+      });
+
+      // Post Double-Entry Journal Entry
+      const customer = await tx.customer.findUnique({ where: { id: customerId } });
+      const customerName = customer ? customer.name : 'Customer';
+
+      const totalCogs = saleItemsData.reduce((sum, item) => sum + (Number(item.qty) * Number(item.rawCopperCostAtSale)), 0);
+
+      const journalLines: { accountName: string; accountType: 'ASSET' | 'LIABILITY' | 'EQUITY' | 'REVENUE' | 'EXPENSE'; debit: number; credit: number; }[] = [
+        { accountName: 'Accounts Receivable', accountType: 'ASSET', debit: grandTotal, credit: 0 },
+        { accountName: 'Sales Revenue', accountType: 'REVENUE', debit: 0, credit: grandTotal }
+      ];
+
+      if (totalCogs > 0) {
+        journalLines.push(
+          { accountName: 'Cost of Goods Sold', accountType: 'EXPENSE' as const, debit: totalCogs, credit: 0 },
+          { accountName: 'Inventory', accountType: 'ASSET' as const, debit: 0, credit: totalCogs }
+        );
+      }
+
+      await postJournalEntry(tx, {
+        date: recordDate,
+        description: `Invoice Sale to ${customerName} (ID: ${sale.id})`,
+        referenceType: 'SALE',
+        referenceId: sale.id,
+        lines: journalLines
       });
 
       return sale;

@@ -282,9 +282,89 @@ export async function GET(request: Request) {
       : 450000;
     const predictedScrapValue = predictedScrapTons * avgScrapPrice;
 
+    // P&L Calculations (Timeframe-based)
+    const plLines = await prisma.journalLine.groupBy({
+      by: ['accountName', 'accountType'],
+      where: {
+        journalEntry: {
+          date: { gte: startDate, lte: endDate }
+        }
+      },
+      _sum: { debit: true, credit: true }
+    });
+
+    const getPLAmount = (name: string, type: string) => {
+      const line = plLines.find(l => l.accountName === name);
+      if (!line) return 0;
+      const dr = Number(line._sum.debit || 0);
+      const cr = Number(line._sum.credit || 0);
+      return type === 'REVENUE' ? (cr - dr) : (dr - cr);
+    };
+
+    const plSalesRevenue = getPLAmount('Sales Revenue', 'REVENUE');
+    // Sum standard scrap accounts
+    const plScrapRevenue = getPLAmount('Scrap Sales', 'REVENUE') || getPLAmount('Scrap Revenue', 'REVENUE') || 0;
+    const plTotalRevenue = plSalesRevenue + plScrapRevenue;
+
+    const plCogs = getPLAmount('Cost of Goods Sold', 'EXPENSE');
+    const plGrossProfit = plTotalRevenue - plCogs;
+
+    const plFactoryExpenses = getPLAmount('Factory Expenses', 'EXPENSE');
+    const plNetProfit = plGrossProfit - plFactoryExpenses;
+
+    // Balance Sheet Calculations (From inception to endDate)
+    const bsLines = await prisma.journalLine.groupBy({
+      by: ['accountName', 'accountType'],
+      where: {
+        journalEntry: {
+          date: { lte: endDate }
+        }
+      },
+      _sum: { debit: true, credit: true }
+    });
+
+    const getBSAmount = (name: string, type: string) => {
+      const line = bsLines.find(l => l.accountName === name);
+      if (!line) return 0;
+      const dr = Number(line._sum.debit || 0);
+      const cr = Number(line._sum.credit || 0);
+      return type === 'ASSET' ? (dr - cr) : (cr - dr);
+    };
+
+    const bsCashBank = getBSAmount('Cash & Bank', 'ASSET');
+    const bsAR = getBSAmount('Accounts Receivable', 'ASSET');
+    const bsInventory = getBSAmount('Inventory', 'ASSET');
+    const bsAdvances = getBSAmount('Employee Advances', 'ASSET');
+    const bsTotalAssets = bsCashBank + bsAR + bsInventory + bsAdvances;
+
+    const bsAP = getBSAmount('Accounts Payable', 'LIABILITY');
+    const bsTotalLiabilities = bsAP;
+    const bsEquity = bsTotalAssets - bsTotalLiabilities;
+
     return NextResponse.json({
       success: true,
       data: {
+        financialStatements: {
+          pl: {
+            salesRevenue: plSalesRevenue,
+            scrapRevenue: plScrapRevenue,
+            totalRevenue: plTotalRevenue,
+            cogs: plCogs,
+            grossProfit: plGrossProfit,
+            operatingExpenses: plFactoryExpenses,
+            netProfit: plNetProfit
+          },
+          bs: {
+            cashBank: bsCashBank,
+            accountsReceivable: bsAR,
+            inventory: bsInventory,
+            employeeAdvances: bsAdvances,
+            totalAssets: bsTotalAssets,
+            accountsPayable: bsAP,
+            totalLiabilities: bsTotalLiabilities,
+            retainedEarnings: bsEquity
+          }
+        },
         expenseBreakdown: expenseData,
         monthlyTrends: dynamicData, // Re-used same key for frontend compatibility
         overallYield: yieldPercent,

@@ -5,6 +5,8 @@ import { NextResponse } from 'next/server';
 
 import { prisma } from '@/lib/prisma';
 import { logAudit } from '@/lib/audit/logger';
+import { assertPeriodNotLocked } from '@/lib/periodLock';
+import { postJournalEntry } from '@/lib/ledger/journal';
 
 export async function GET() {
   try {
@@ -29,6 +31,9 @@ export async function DELETE(request: Request) {
        const production = await tx.production.findUnique({ where: { id } });
        if (!production) throw new Error('Production not found');
 
+       // Assert period not locked before deleting
+       await assertPeriodNotLocked(production.date);
+
        // Remove corresponding scrap generated entry
        await tx.scrapInventory.updateMany({
           where: {
@@ -37,6 +42,11 @@ export async function DELETE(request: Request) {
              type: 'GENERATED'
           },
           data: { isDeleted: true }
+       });
+
+       // Delete journal entries associated with this Production run
+       await tx.journalEntry.deleteMany({
+          where: { referenceType: 'PRODUCTION', referenceId: id }
        });
 
        await tx.production.update({ where: { id }, data: { isDeleted: true } });
@@ -75,6 +85,7 @@ export async function POST(request: Request) {
     }
 
     const recordDate = date ? new Date(date) : new Date();
+    await assertPeriodNotLocked(recordDate);
 
     const result = await prisma.$transaction(async (tx) => {
       // Check available stock inside transaction by summing active batches (ensures consistency with green display box)
@@ -154,6 +165,18 @@ export async function POST(request: Request) {
             type: 'GENERATED',
             qty: parsedRaw - parsedProduced
          }
+      });
+
+      // Post Double-Entry Journal Entry
+      await postJournalEntry(tx, {
+        date: recordDate,
+        description: `Production Run: Produced ${parsedProduced}T ${productCategory} from ${parsedRaw}T Raw Copper (ID: ${production.id})`,
+        referenceType: 'PRODUCTION' as any,
+        referenceId: production.id,
+        lines: [
+          { accountName: 'Inventory', accountType: 'ASSET' as const, debit: totalRawCost, credit: 0 },
+          { accountName: 'Inventory', accountType: 'ASSET' as const, debit: 0, credit: totalRawCost }
+        ]
       });
 
       return production;

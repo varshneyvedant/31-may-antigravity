@@ -32,7 +32,7 @@ async function main() {
   await prisma.paymentRecord.create({
      data: {
        date: subDays(new Date(), 1095), // 3 years ago
-       amount: 50000000, // 5 Crore initial investment
+       amount: 3000000000, // 300 Crore initial investment
        type: "INCOMING",
        description: 'Initial Capital Injection'
      }

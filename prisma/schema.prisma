@@ -64,6 +64,8 @@ model PaymentRecord {
   invoicePayments InvoicePayment[]
   billPayments    BillPayment[]
 
+  status         ApprovalStatus @default(APPROVED)
+
   @@index([date])
   @@index([customerId])
   @@index([supplierId])
@@ -191,6 +193,7 @@ model Purchase {
   supplier       Supplier        @relation(fields: [supplierId], references: [id])
   inventoryBatch InventoryBatch?
   billPayments   BillPayment[]
+  debitNotes     DebitNote[]
   isDeleted      Boolean         @default(false)
 
   @@index([date])
@@ -261,6 +264,7 @@ model Sale {
   customer        Customer         @relation(fields: [customerId], references: [id])
   items           SaleItem[]
   invoicePayments InvoicePayment[]
+  creditNotes     CreditNote[]
   isDeleted       Boolean          @default(false)
 
   @@index([date])
@@ -333,4 +337,66 @@ model AuditLog {
   module      String // "Sales", "Purchases", "Production", etc.
   description String // Human readable summary
   details     String? // JSON string of old/new values
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model JournalEntry {
+  id            String        @id @default(uuid())
+  date          DateTime      @default(now())
+  description   String
+  referenceType String?       // "SALE", "PURCHASE", "PAYMENT", "EXPENSE", "ADVANCE", "CREDIT_NOTE", "DEBIT_NOTE"
+  referenceId   String?       // Reference ID of source record
+  lines         JournalLine[]
+  createdAt     DateTime      @default(now())
+
+  @@index([date])
+}
+
+model JournalLine {
+  id             String       @id @default(uuid())
+  journalEntryId String
+  accountName    String       // e.g. "Accounts Receivable", "Accounts Payable", "Cash & Bank", "Sales Revenue", "COGS", "Factory Expenses", "Scrap Revenue"
+  accountType    String       // "ASSET", "LIABILITY", "EQUITY", "REVENUE", "EXPENSE"
+  debit          Decimal      @default(0)
+  credit         Decimal      @default(0)
+  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+
+  @@index([journalEntryId])
+  @@index([accountName])
+}
+
+model CreditNote {
+  id             String   @id @default(uuid())
+  date           DateTime @default(now())
+  saleId         String
+  qtyReturned    Decimal  // Tons returned
+  amountCredited Decimal  // Reduction in Customer AR
+  reason         String?
+  sale           Sale     @relation(fields: [saleId], references: [id])
+
+  @@index([saleId])
+}
+
+model DebitNote {
+  id            String   @id @default(uuid())
+  date          DateTime @default(now())
+  purchaseId    String
+  qtyReturned   Decimal  // Tons returned
+  amountDebited Decimal  // Reduction in Supplier AP
+  reason        String?
+  purchase      Purchase @relation(fields: [purchaseId], references: [id])
+
+  @@index([purchaseId])
+}
+
+model PeriodLock {
+  id        String   @id @default(uuid())
+  yearMonth String   @unique // "YYYY-MM" format, e.g. "2026-05"
+  locked    Boolean  @default(true)
+  lockedAt  DateTime @default(now())
 }

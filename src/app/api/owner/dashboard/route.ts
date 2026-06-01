@@ -63,6 +63,13 @@ export async function GET() {
       take: 5
     });
 
+    // 4. Pending Payment Authorizations (Dual-Auth)
+    const pendingPayments = await prisma.paymentRecord.findMany({
+      where: { status: 'PENDING' },
+      include: { customer: true, supplier: true },
+      orderBy: { date: 'desc' }
+    });
+
     return NextResponse.json({
       success: true,
       data: {
@@ -77,7 +84,8 @@ export async function GET() {
           productionToday: Number(productionToday._sum.wireProduced || 0),
           yield30Days: yieldPercent
         },
-        recentAudits
+        recentAudits,
+        pendingPayments
       }
     });
   } catch (error) {
