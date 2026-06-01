@@ -6,6 +6,7 @@ import { create } from 'zustand';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { exportToExcel } from '@/lib/export/excel';
 import { exportToPDF } from '@/lib/export/pdf';
+import html2canvas from 'html2canvas';
 
 interface SaleItem {
   productCategory: string;
@@ -207,11 +208,12 @@ export default function RecordSale() {
     if (!element || !createdSaleForSlip) return;
     setSharing(true);
     try {
-      const html2canvas = (await import('html2canvas')).default;
       const canvas = await html2canvas(element, {
         backgroundColor: '#fcfbf4',
         scale: 2,
-        useCORS: true
+        logging: false,
+        allowTaint: true,
+        useCORS: false
       });
 
       const phone = createdSaleForSlip.customer?.contact || '';
@@ -275,11 +277,12 @@ export default function RecordSale() {
     const element = document.getElementById('ledger-slip');
     if (!element) return;
     try {
-      const html2canvas = (await import('html2canvas')).default;
       const canvas = await html2canvas(element, {
         backgroundColor: '#fcfbf4',
         scale: 2,
-        useCORS: true
+        logging: false,
+        allowTaint: true,
+        useCORS: false
       });
       const link = document.createElement('a');
       link.download = `ledger-slip-${createdSaleForSlip?.invoiceNo || Date.now()}.png`;
