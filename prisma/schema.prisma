@@ -400,3 +400,11 @@ model PeriodLock {
   locked    Boolean  @default(true)
   lockedAt  DateTime @default(now())
 }
+
+model IdempotencyRecord {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  status    String   // "PROCESSING", "SUCCESS", "FAILED"
+  response  String?  // Stringified JSON response
+  createdAt DateTime @default(now())
+}

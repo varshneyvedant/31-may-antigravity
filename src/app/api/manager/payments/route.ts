@@ -7,6 +7,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { assertPeriodNotLocked } from '@/lib/periodLock';
 import { postJournalEntry } from '@/lib/ledger/journal';
+import { checkIdempotency, completeIdempotency } from '@/lib/idempotency';
 
 export async function GET() {
   try {
@@ -130,24 +131,32 @@ export async function DELETE(request: Request) {
 }
 
 export async function POST(request: Request) {
+  let idempotencyKey: string | null = null;
   try {
     const session = await getServerSession(authOptions);
     const isManager = (session?.user as any)?.role?.toLowerCase() === 'manager';
 
     const body = await request.json();
-    const validation = ManagerPaymentPostSchema.safeParse(body);
-    if (!validation.success) {
-      return NextResponse.json({ error: "Invalid data", details: validation.error.format() }, { status: 400 });
-    }
-    const { type, stakeholderId, amount, idempotencyKey } = validation.data;
-    const paymentAmount = Number(amount);
+    idempotencyKey = request.headers.get('x-idempotency-key') || body.idempotencyKey || null;
 
     if (idempotencyKey) {
-        const existingPayment = await prisma.paymentRecord.findUnique({ where: { idempotencyKey } });
-        if (existingPayment) {
-            return NextResponse.json({ success: true, message: 'Payment already processed' });
+      const idem = await checkIdempotency(idempotencyKey);
+      if (idem) {
+        if (idem.status === 'PROCESSING') {
+          return NextResponse.json({ error: 'Transaction is already being processed, please wait.' }, { status: 409 });
         }
+        return NextResponse.json(idem.response, { status: 200 });
+      }
     }
+
+    const validation = ManagerPaymentPostSchema.safeParse(body);
+    if (!validation.success) {
+      const errRes = { error: "Invalid data", details: validation.error.format() };
+      if (idempotencyKey) await completeIdempotency(idempotencyKey, 'FAILED', errRes);
+      return NextResponse.json(errRes, { status: 400 });
+    }
+    const { type, stakeholderId, amount } = validation.data;
+    const paymentAmount = Number(amount);
 
     // Assert period locking
     await assertPeriodNotLocked(new Date());
@@ -174,7 +183,9 @@ export async function POST(request: Request) {
         details: { id: pendingPayment.id, type, stakeholderId, amount: paymentAmount }
       });
 
-      return NextResponse.json({ success: true, message: 'Payment successfully submitted for Owner Authorization.' });
+      const successRes = { success: true, message: 'Payment successfully submitted for Owner Authorization.' };
+      if (idempotencyKey) await completeIdempotency(idempotencyKey, 'SUCCESS', successRes);
+      return NextResponse.json(successRes);
     }
 
     // 2. Owner Flow: Payment is AUTO-APPROVED and immediately posted to ledger & journals
@@ -346,9 +357,15 @@ export async function POST(request: Request) {
       details: { type, stakeholderId, amount: paymentAmount, status: 'APPROVED' }
     });
 
-    return NextResponse.json({ success: true });
+    const successRes = { success: true };
+    if (idempotencyKey) {
+      await completeIdempotency(idempotencyKey, 'SUCCESS', successRes);
+    }
+    return NextResponse.json(successRes);
   } catch (error: any) {
     console.error(error);
-    return NextResponse.json({ error: error.message || 'Database transaction failed' }, { status: 500 });
+    const errRes = { error: error.message || 'Database transaction failed' };
+    if (idempotencyKey) await completeIdempotency(idempotencyKey, 'FAILED', errRes);
+    return NextResponse.json(errRes, { status: 500 });
   }
 }

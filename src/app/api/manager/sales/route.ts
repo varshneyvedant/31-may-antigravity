@@ -129,7 +129,7 @@ export async function POST(request: Request) {
 
                   await tx.inventoryBatch.update({
                       where: { id: batch.id },
-                      data: { remainingQty: availableInBatch - deductAmount }
+                      data: { remainingQty: Math.max(0, availableInBatch - deductAmount) }
                   });
                   remainingToDeduct -= deductAmount;
               }

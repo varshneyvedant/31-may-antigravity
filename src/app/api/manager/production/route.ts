@@ -7,6 +7,8 @@ import { prisma } from '@/lib/prisma';
 import { logAudit } from '@/lib/audit/logger';
 import { assertPeriodNotLocked } from '@/lib/periodLock';
 import { postJournalEntry } from '@/lib/ledger/journal';
+import { reconcileFIFOBook } from '@/lib/ledger/reconciliation';
+import { checkIdempotency, completeIdempotency } from '@/lib/idempotency';
 
 export async function GET() {
   try {
@@ -50,6 +52,7 @@ export async function DELETE(request: Request) {
        });
 
        await tx.production.update({ where: { id }, data: { isDeleted: true } });
+       await reconcileFIFOBook(tx);
     });
 
     await logAudit({
@@ -65,11 +68,26 @@ export async function DELETE(request: Request) {
 }
 
 export async function POST(request: Request) {
+  let idempotencyKey: string | null = null;
   try {
     const body = await request.json();
+    idempotencyKey = request.headers.get('x-idempotency-key') || body.idempotencyKey || null;
+
+    if (idempotencyKey) {
+      const idem = await checkIdempotency(idempotencyKey);
+      if (idem) {
+        if (idem.status === 'PROCESSING') {
+          return NextResponse.json({ error: 'Transaction is already being processed, please wait.' }, { status: 409 });
+        }
+        return NextResponse.json(idem.response, { status: 200 });
+      }
+    }
+
     const validation = ManagerProductionPostSchema.safeParse(body);
     if (!validation.success) {
-      return NextResponse.json({ error: "Invalid data", details: validation.error.format() }, { status: 400 });
+      const errRes = { error: "Invalid data", details: validation.error.format() };
+      if (idempotencyKey) await completeIdempotency(idempotencyKey, 'FAILED', errRes);
+      return NextResponse.json(errRes, { status: 400 });
     }
     const { rawCopperUsed, productCategory, brand, wireType, wireProduced, date } = validation.data;
 
@@ -77,11 +95,15 @@ export async function POST(request: Request) {
     const parsedProduced = wireProduced;
 
     if (parsedRaw < 0.01 || parsedProduced < 0.01) {
-        return NextResponse.json({ error: 'it is too small quantity to do this transaction contact your developer' }, { status: 400 });
+      const errRes = { error: 'it is too small quantity to do this transaction contact your developer' };
+      if (idempotencyKey) await completeIdempotency(idempotencyKey, 'FAILED', errRes);
+      return NextResponse.json(errRes, { status: 400 });
     }
 
     if (parsedProduced > parsedRaw) {
-        return NextResponse.json({ error: 'Finished wire produced cannot be greater than raw copper used.' }, { status: 400 });
+      const errRes = { error: 'Finished wire produced cannot be greater than raw copper used.' };
+      if (idempotencyKey) await completeIdempotency(idempotencyKey, 'FAILED', errRes);
+      return NextResponse.json(errRes, { status: 400 });
     }
 
     const recordDate = date ? new Date(date) : new Date();
@@ -179,6 +201,7 @@ export async function POST(request: Request) {
         ]
       });
 
+      await reconcileFIFOBook(tx);
       return production;
     });
 
@@ -189,9 +212,17 @@ export async function POST(request: Request) {
       details: { id: result.id, rawCopperUsed, wireProduced, productCategory, brand, wireType }
     });
 
-    return NextResponse.json({ success: true, production: result });
+    const successResponse = { success: true, production: result };
+    if (idempotencyKey) {
+      await completeIdempotency(idempotencyKey, 'SUCCESS', successResponse);
+    }
+    return NextResponse.json(successResponse);
   } catch (error: any) {
     console.error(error);
-    return NextResponse.json({ error: error.message || 'Database transaction failed' }, { status: 500 });
+    const errResponse = { error: error.message || 'Database transaction failed' };
+    if (idempotencyKey) {
+      await completeIdempotency(idempotencyKey, 'FAILED', errResponse);
+    }
+    return NextResponse.json(errResponse, { status: 500 });
   }
 }

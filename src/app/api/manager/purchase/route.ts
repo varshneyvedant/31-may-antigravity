@@ -7,6 +7,8 @@ import { prisma } from '@/lib/prisma';
 import { logAudit } from '@/lib/audit/logger';
 import { assertPeriodNotLocked } from '@/lib/periodLock';
 import { postJournalEntry } from '@/lib/ledger/journal';
+import { reconcileFIFOBook } from '@/lib/ledger/reconciliation';
+import { checkIdempotency, completeIdempotency } from '@/lib/idempotency';
 
 export async function GET() {
   try {
@@ -53,8 +55,9 @@ export async function DELETE(request: Request) {
           where: { referenceType: 'PURCHASE', referenceId: id }
        });
 
-       await tx.purchase.update({ where: { id }, data: { isDeleted: true } });
-    });
+        await tx.purchase.update({ where: { id }, data: { isDeleted: true } });
+        await reconcileFIFOBook(tx);
+     });
 
     await logAudit({
         action: 'DELETE',
@@ -69,11 +72,26 @@ export async function DELETE(request: Request) {
 }
 
 export async function POST(request: Request) {
+  let idempotencyKey: string | null = null;
   try {
     const body = await request.json();
+    idempotencyKey = request.headers.get('x-idempotency-key') || body.idempotencyKey || null;
+
+    if (idempotencyKey) {
+      const idem = await checkIdempotency(idempotencyKey);
+      if (idem) {
+        if (idem.status === 'PROCESSING') {
+          return NextResponse.json({ error: 'Transaction is already being processed, please wait.' }, { status: 409 });
+        }
+        return NextResponse.json(idem.response, { status: 200 });
+      }
+    }
+
     const validation = ManagerPurchasePostSchema.safeParse(body);
     if (!validation.success) {
-      return NextResponse.json({ error: "Invalid data", details: validation.error.format() }, { status: 400 });
+      const errRes = { error: "Invalid data", details: validation.error.format() };
+      if (idempotencyKey) await completeIdempotency(idempotencyKey, 'FAILED', errRes);
+      return NextResponse.json(errRes, { status: 400 });
     }
     const { supplierId, qty, pricePerTon, date } = validation.data;
 
@@ -82,7 +100,9 @@ export async function POST(request: Request) {
     const totalValue = quantity * price;
 
     if (quantity < 0.01 || price < 0.01) {
-        return NextResponse.json({ error: 'it is too small quantity to do this transaction contact your developer' }, { status: 400 });
+      const errRes = { error: 'it is too small quantity to do this transaction contact your developer' };
+      if (idempotencyKey) await completeIdempotency(idempotencyKey, 'FAILED', errRes);
+      return NextResponse.json(errRes, { status: 400 });
     }
 
     const recordDate = date ? new Date(date) : new Date();
@@ -135,6 +155,7 @@ export async function POST(request: Request) {
         ]
       });
 
+      await reconcileFIFOBook(tx);
       return purchase;
     });
 
@@ -145,8 +166,17 @@ export async function POST(request: Request) {
       details: { id: result.id, quantity, price }
     });
 
-    return NextResponse.json({ success: true, purchase: result });
-  } catch (error) {
-    return NextResponse.json({ error: 'Database transaction failed' }, { status: 500 });
+    const successResponse = { success: true, purchase: result };
+    if (idempotencyKey) {
+      await completeIdempotency(idempotencyKey, 'SUCCESS', successResponse);
+    }
+    return NextResponse.json(successResponse);
+  } catch (error: any) {
+    console.error(error);
+    const errResponse = { error: error.message || 'Database transaction failed' };
+    if (idempotencyKey) {
+      await completeIdempotency(idempotencyKey, 'FAILED', errResponse);
+    }
+    return NextResponse.json(errResponse, { status: 500 });
   }
 }
