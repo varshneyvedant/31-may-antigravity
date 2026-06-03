@@ -207,68 +207,101 @@ export default function RecordSale() {
     const element = document.getElementById('ledger-slip');
     if (!element || !createdSaleForSlip) return;
     setSharing(true);
+    const disabledSheets: HTMLStyleElement[] = [];
     try {
+      // Temporarily disable all document stylesheets to bypass Tailwind CSS v4 "lab()" color parsing crashes inside html2canvas
+      const styles = document.querySelectorAll('style, link[rel="stylesheet"]');
+      styles.forEach((el: any) => {
+        if (!el.disabled) {
+          el.disabled = true;
+          disabledSheets.push(el);
+        }
+      });
+
       const canvas = await html2canvas(element, {
         backgroundColor: '#fcfbf4',
         scale: 2,
         logging: false,
-        allowTaint: true,
-        useCORS: false
+        allowTaint: false,
+        useCORS: true
       });
 
-      const phone = createdSaleForSlip.customer?.contact || '';
-      const textNotice = `Hi, I am sharing the Invoice/Ledger Slip image (${createdSaleForSlip.invoiceNo}) for ₹${createdSaleForSlip.total.toLocaleString('en-IN', {maximumFractionDigits:0})} with you.`;
+      // Restore all stylesheets immediately after canvas render
+      disabledSheets.forEach(el => el.disabled = false);
 
-      // 1. Try Web Share API (shares the image file directly on mobile / supported devices)
-      canvas.toBlob(async (blob) => {
-        if (!blob) {
-          setSharing(false);
-          return;
-        }
+      const rawPhone = createdSaleForSlip.customer?.contact || '';
+      // Format number for direct WhatsApp chat: strip spaces, non-digits, and auto-prefix '91' for 10-digit Indian numbers
+      let cleanedPhone = rawPhone.replace(/\D/g, '');
+      if (cleanedPhone.startsWith('91') && cleanedPhone.length === 12) {
+        // already correct
+      } else if (cleanedPhone.length === 10) {
+        cleanedPhone = '91' + cleanedPhone;
+      } else if (cleanedPhone.startsWith('0') && cleanedPhone.length === 11) {
+        cleanedPhone = '91' + cleanedPhone.slice(1);
+      }
+      
+      const dateStr = new Date(createdSaleForSlip.date).toLocaleDateString('en-IN');
+      const partyName = createdSaleForSlip.customer?.name || 'Cash Sale';
+      const transport = createdSaleForSlip.customer?.transport || '';
+      
+      let itemsListStr = '';
+      createdSaleForSlip.items.forEach((item: any) => {
+        const itemName = item.productCategory === 'Raw Copper Bundle' 
+          ? 'Raw Copper Bundle' 
+          : `${item.brand} ${item.wireType}`;
+        const qtyVal = Number(item.qty);
+        itemsListStr += `- ${itemName} (${qtyVal.toFixed(2)} Tons) @ ₹${item.pricePerKg}/Kg = ₹${calculateItemTotal(item).toLocaleString('en-IN', {maximumFractionDigits:0})}\n`;
+      });
 
-        let shared = false;
+      let waText = `*LEDGER SLIP*\n`;
+      waText += `----------------------------------------\n`;
+      waText += `*Date:* ${dateStr}\n`;
+      waText += `*Party Name:* ${partyName}\n`;
+      if (transport) {
+        waText += `*Transport:* ${transport}\n`;
+      }
+      waText += `----------------------------------------\n`;
+      waText += `*Items Details:*\n${itemsListStr}`;
+      waText += `----------------------------------------\n`;
+      waText += `*GRAND TOTAL: ₹${createdSaleForSlip.total.toLocaleString('en-IN', {maximumFractionDigits:0})}*\n`;
+      waText += `----------------------------------------`;
+
+      // Copy image to clipboard automatically so the user can simply paste (Ctrl+V) it in the opened chat
+      if (typeof navigator !== 'undefined' && navigator.clipboard && typeof ClipboardItem !== 'undefined') {
         try {
-          if (typeof navigator !== 'undefined' && navigator.share && typeof File !== 'undefined') {
-            const file = new File([blob], `ledger-slip-${createdSaleForSlip.invoiceNo}.png`, { type: 'image/png' });
-            const canShareFiles = navigator.canShare && navigator.canShare({ files: [file] });
-            if (canShareFiles) {
-              await navigator.share({
-                files: [file],
-                title: `Ledger Slip ${createdSaleForSlip.invoiceNo}`,
-                text: textNotice
-              });
-              shared = true;
-            }
-          }
-        } catch (shareErr) {
-          console.warn('Web Share failed, using reliable fallback:', shareErr);
+          const imgPromise = new Promise<Blob | null>((resolve) => {
+            canvas.toBlob((blob) => resolve(blob), 'image/png');
+          });
+          const item = new ClipboardItem({
+            'image/png': imgPromise as Promise<Blob>
+          });
+          await navigator.clipboard.write([item]);
+          console.log('Invoice copied to clipboard successfully.');
+        } catch (clipErr: any) {
+          console.warn('Clipboard copy failed:', clipErr);
         }
+      }
 
-        if (shared) {
-          setSharing(false);
-          return;
-        }
+      // Trigger automatic image download first so the user has it ready in their gallery/downloads to attach as fallback
+      try {
+        const link = document.createElement('a');
+        link.download = `ledger-slip-${createdSaleForSlip.invoiceNo}.png`;
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+      } catch (downloadErr) {
+        console.error('Failed to trigger download:', downloadErr);
+      }
 
-        // 2. Fallback: Download PNG image + Open prefilled WhatsApp Chat
-        try {
-          const link = document.createElement('a');
-          link.download = `ledger-slip-${createdSaleForSlip.invoiceNo}.png`;
-          link.href = canvas.toDataURL('image/png');
-          link.click();
-        } catch (downloadErr) {
-          console.error('Failed to trigger download:', downloadErr);
-        }
+      // Redirect directly to the customer's WhatsApp chat
+      const waUrl = `https://wa.me/${cleanedPhone}?text=${encodeURIComponent(waText)}`;
+      window.open(waUrl, '_blank');
+      setSharing(false);
 
-        // Redirect to WhatsApp Web/App
-        const waText = `${textNotice} I have downloaded the image to your device, please attach it in the chat.`;
-        const waUrl = `https://api.whatsapp.com/send?phone=${encodeURIComponent(phone)}&text=${encodeURIComponent(waText)}`;
-        window.open(waUrl, '_blank');
-        setSharing(false);
-      }, 'image/png');
-
-    } catch (err) {
+    } catch (err: any) {
+      // Clean up in case of error
+      disabledSheets.forEach(el => el.disabled = false);
       console.error('Error generating image for share:', err);
-      alert('Failed to generate image. Try using manual download first.');
+      alert('Failed to generate image: ' + err.message + '\nStack: ' + (err.stack || ''));
       setSharing(false);
     }
   };
@@ -276,28 +309,161 @@ export default function RecordSale() {
   const handleDownloadImage = async () => {
     const element = document.getElementById('ledger-slip');
     if (!element) return;
+    const disabledSheets: HTMLStyleElement[] = [];
     try {
+      const styles = document.querySelectorAll('style, link[rel="stylesheet"]');
+      styles.forEach((el: any) => {
+        if (!el.disabled) {
+          el.disabled = true;
+          disabledSheets.push(el);
+        }
+      });
+
       const canvas = await html2canvas(element, {
         backgroundColor: '#fcfbf4',
         scale: 2,
         logging: false,
-        allowTaint: true,
-        useCORS: false
+        allowTaint: false,
+        useCORS: true
       });
+
+      // Restore all stylesheets immediately after canvas render
+      disabledSheets.forEach(el => el.disabled = false);
+
       const link = document.createElement('a');
       link.download = `ledger-slip-${createdSaleForSlip?.invoiceNo || Date.now()}.png`;
       link.href = canvas.toDataURL('image/png');
       link.click();
-    } catch (err) {
+    } catch (err: any) {
+      disabledSheets.forEach(el => el.disabled = false);
       console.error('Error generating image:', err);
-      alert('Failed to generate image. Please try again.');
+      alert('Failed to generate image: ' + err.message + '\nStack: ' + (err.stack || ''));
     }
   };
 
   return (
     <div className="max-w-3xl mx-auto">
-      {/* Import Caveat Handwriting Google Font */}
-      <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&display=swap" rel="stylesheet" />
+      <style id="ledger-slip-styles">{`
+        .ledger-slip-container {
+          background-color: #fcfbf4;
+          color: #1c3a6b !important;
+          padding: 20px 12px;
+          border-radius: 8px;
+          border: 2px solid #4e4033;
+          position: relative;
+          overflow: hidden;
+          user-select: none;
+          width: 380px;
+          max-width: 100%;
+          margin: 0 auto;
+          box-sizing: border-box;
+          font-family: 'Segoe Print', 'Comic Sans MS', 'Apple Chancery', cursive;
+        }
+        .ledger-ruled-lines {
+          position: absolute;
+          inset: 0;
+          opacity: 0.15;
+          pointer-events: none;
+          background-image: linear-gradient(#5a4b3b 1px, transparent 1px);
+          background-size: 100% 28px;
+          margin-top: 35px;
+        }
+        .ledger-margin-line {
+          position: absolute;
+          left: 25px;
+          top: 0;
+          bottom: 0;
+          border-left: 1px solid red;
+          opacity: 0.4;
+        }
+        .ledger-header {
+          text-align: center;
+          margin-bottom: 16px;
+          padding-left: 25px;
+          border-bottom: 1px solid rgba(28, 58, 107, 0.2);
+          padding-bottom: 6px;
+        }
+        .ledger-title {
+          font-size: 26px;
+          font-weight: 900;
+          letter-spacing: 0.05em;
+          text-transform: uppercase;
+        }
+        .ledger-meta {
+          padding-left: 25px;
+          margin-bottom: 16px;
+          border-bottom: 2px dashed rgba(78, 64, 51, 0.4);
+          padding-bottom: 12px;
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          font-size: 16px;
+        }
+        .ledger-meta-row {
+          display: flex;
+          justify-content: space-between;
+        }
+        .ledger-grid {
+          padding-left: 25px;
+          min-height: 140px;
+          font-size: 16px;
+          border-bottom: 2px solid #1c3a6b;
+          padding-bottom: 12px;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+        .ledger-grid-header {
+          display: flex;
+          font-weight: bold;
+          border-bottom: 1px solid #1c3a6b;
+          padding-bottom: 4px;
+          font-size: 13px;
+          text-transform: uppercase;
+        }
+        .ledger-grid-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          font-size: 15px;
+        }
+        .ledger-col-name {
+          width: 50%;
+          line-height: 1.25;
+          word-break: break-word;
+        }
+        .ledger-col-qty {
+          width: 18%;
+          text-align: center;
+        }
+        .ledger-col-amount {
+          width: 32%;
+          text-align: right;
+          white-space: nowrap;
+          font-size: 13px;
+          font-weight: bold;
+        }
+        .ledger-total-section {
+          padding-left: 25px;
+          padding-top: 12px;
+          display: flex;
+          justify-content: flex-end;
+          position: relative;
+        }
+        .ledger-total-box {
+          text-align: right;
+        }
+        .ledger-total-label {
+          font-size: 16px;
+          font-weight: bold;
+        }
+        .ledger-total-value {
+          font-size: 20px;
+          font-weight: 900;
+          border-bottom: 4px double #1c3a6b;
+          display: inline-block;
+        }
+      `}</style>
 
       <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
         <span className="text-red-500">Record</span> Customer Sale Invoice
@@ -600,74 +766,69 @@ export default function RecordSale() {
          <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-50 p-4 overflow-y-auto">
             <div className="max-w-md w-full flex flex-col gap-4">
                
-               {/* Notebook Page Ledger Wrapper */}
-               <div id="ledger-slip" className="bg-[#fcfbf4] text-[#1c3a6b] p-6 rounded shadow-2xl border-2 border-[#4e4033] relative overflow-hidden font-handwritten select-none" style={{ fontFamily: "'Caveat', cursive" }}>
-                  
-                  {/* Ledger ruled lines pattern */}
-                  <div className="absolute inset-0 opacity-15 pointer-events-none" style={{
-                     backgroundImage: 'linear-gradient(#5a4b3b 1px, transparent 1px)',
-                     backgroundSize: '100% 28px',
-                     marginTop: '35px'
-                  }}></div>
+               <div id="ledger-slip" className="ledger-slip-container select-none">
+                   
+                   {/* Ledger ruled lines pattern */}
+                   <div className="ledger-ruled-lines"></div>
 
-                  {/* Red margin line */}
-                  <div className="absolute left-10 top-0 bottom-0 border-l border-red-400 opacity-40"></div>
+                   {/* Red margin line */}
+                   <div className="ledger-margin-line"></div>
 
-                  {/* Header Title */}
-                  <div className="text-center mb-6 pl-10 border-b border-[#1c3a6b]/20 pb-2">
-                     <h3 className="text-3xl font-black tracking-wide transform -rotate-1 rounded-sm uppercase">
-                        Ledger Slip
-                     </h3>
-                  </div>
+                   {/* Header Title */}
+                   <div className="ledger-header">
+                      <h3 className="ledger-title" style={{ transform: 'rotate(-1deg)' }}>
+                         Ledger Slip
+                      </h3>
+                   </div>
 
-                  {/* Metadata block */}
-                  <div className="space-y-1.5 text-xl pl-10 mb-6 border-b-2 border-dashed border-[#4e4033]/40 pb-4">
-                     <div className="flex justify-between">
-                        <span>Party Name: <strong>{createdSaleForSlip.customer?.name || 'Cash Sale'}</strong></span>
-                        <span>Date: <strong>{new Date(createdSaleForSlip.date).toLocaleDateString('en-IN')}</strong></span>
-                     </div>
-                     {createdSaleForSlip.customer?.transport && (
-                        <div>
-                           <span>Transport: <strong>{createdSaleForSlip.customer.transport}</strong></span>
-                        </div>
-                     )}
-                  </div>
+                   {/* Metadata block */}
+                   <div className="ledger-meta">
+                      <div className="ledger-meta-row">
+                         <span>Party Name: <strong>{createdSaleForSlip.customer?.name || 'Cash Sale'}</strong></span>
+                         <span>Date: <strong>{new Date(createdSaleForSlip.date).toLocaleDateString('en-IN')}</strong></span>
+                      </div>
+                      {createdSaleForSlip.customer?.transport && (
+                         <div>
+                            <span>Transport: <strong>{createdSaleForSlip.customer.transport}</strong></span>
+                         </div>
+                      )}
+                   </div>
 
-                  {/* Ruled Columns Ledger Grid */}
-                  <div className="space-y-4 pl-10 min-h-[160px] text-xl border-b-2 border-[#1c3a6b] pb-4">
-                     <div className="flex font-black border-b border-[#1c3a6b] pb-1 text-sm uppercase">
-                        <span className="w-1/2">Particulars</span>
-                        <span className="w-1/4 text-center">Qty (Tons)</span>
-                        <span className="w-1/4 text-right">Amount</span>
-                     </div>
-                     <div className="space-y-3">
-                        {createdSaleForSlip.items.map((item: any, i: number) => (
-                           <div key={i} className="flex justify-between items-center text-lg">
-                              <span className="w-1/2 leading-tight">
-                                 {item.productCategory === 'Raw Copper Bundle' 
-                                   ? 'Raw Copper Bundle' 
-                                   : `${item.brand} ${item.wireType}`}
-                                 <br />
-                                 <span className="text-sm text-gray-500 opacity-80">@ ₹{item.pricePerKg}/kg</span>
-                              </span>
-                              <span className="w-1/4 text-center">{Number(item.qty).toFixed(2)}T</span>
-                              <span className="w-1/4 text-right">₹ {calculateItemTotal(item).toLocaleString('en-IN', {maximumFractionDigits:0})}</span>
-                           </div>
-                        ))}
-                     </div>
-                  </div>
+                   {/* Ruled Columns Ledger Grid */}
+                   <div className="ledger-grid">
+                      <div className="ledger-grid-header">
+                         <span className="ledger-col-name">Particulars</span>
+                         <span className="ledger-col-qty">Qty (Tons)</span>
+                         <span className="ledger-col-amount">Amount</span>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                         {createdSaleForSlip.items.map((item: any, i: number) => (
+                            <div key={i} className="ledger-grid-row">
+                               <span className="ledger-col-name">
+                                  {item.productCategory === 'Raw Copper Bundle' 
+                                    ? 'Raw Copper Bundle' 
+                                    : `${item.brand} ${item.wireType}`}
+                                  <br />
+                                  <span style={{ fontSize: '14px', color: '#666', opacity: 0.8 }}>@ ₹{item.pricePerKg}/kg</span>
+                               </span>
+                               <span className="ledger-col-qty">{Number(item.qty).toFixed(2)}T</span>
+                               <span className="ledger-col-amount">₹ {calculateItemTotal(item).toLocaleString('en-IN', {maximumFractionDigits:0})}</span>
+                            </div>
+                         ))}
+                      </div>
+                   </div>
 
-                  {/* Total Value */}
-                  <div className="pl-10 pt-4 flex justify-between items-end relative">
-                     <div className="text-right ml-auto">
-                        <span className="text-lg font-bold">Grand Total:</span>
-                        <div className="text-3xl font-black border-b-4 border-double border-[#1c3a6b] inline-block">
-                           ₹ {createdSaleForSlip.total.toLocaleString('en-IN', {maximumFractionDigits:0})}
-                        </div>
-                     </div>
-                  </div>
+                   {/* Total Value */}
+                   <div className="ledger-total-section">
+                      <div className="ledger-total-box">
+                         <span className="ledger-total-label">Grand Total:</span>
+                         <div className="ledger-total-value">
+                            ₹ {createdSaleForSlip.total.toLocaleString('en-IN', {maximumFractionDigits:0})}
+                         </div>
+                      </div>
+                   </div>
 
-               </div>
+                </div>
 
                {/* Action Buttons */}
                <div className="flex gap-3">
